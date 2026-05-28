@@ -1,0 +1,338 @@
+"""Dataclasses and enums for Spark Fuse API responses."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
+
+
+class JobStatus(str, Enum):
+    QUEUED = "queued"
+    PROVISIONING = "provisioning"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    SMARTCOMPUTE_INTERRUPTED = "smartcompute-interrupted"
+
+
+TERMINAL_STATUSES: frozenset[str] = frozenset({
+    JobStatus.SUCCEEDED,
+    JobStatus.FAILED,
+    JobStatus.CANCELLED,
+    JobStatus.SMARTCOMPUTE_INTERRUPTED,
+})
+
+
+class ErrorCode(str, Enum):
+    IMAGE_PULL_FAILED = "image_pull_failed"
+    DISK_FULL = "disk_full"
+    INPUT_DOWNLOAD_FAILED = "input_download_failed"
+    OUTPUT_UPLOAD_FAILED = "output_upload_failed"
+    OUTPUT_MOUNT_FAILED = "output_mount_failed"
+    OUTPUT_DRAIN_FAILED = "output_drain_failed"
+    OUTPUT_UNMOUNT_FAILED = "output_unmount_failed"
+    CONTAINER_NONZERO_EXIT = "container_nonzero_exit"
+    CANCELLED = "cancelled"
+    AGENT_SILENT = "agent_silent"
+    START_TIMEOUT = "start_timeout"
+    NO_CAPACITY = "no_capacity"
+    SMARTCOMPUTE_INTERRUPTED = "smartcompute_interrupted"
+    SMARTCOMPUTE_INTERRUPTED_NO_RETRIES_LEFT = "smartcompute_interrupted_no_retries_left"
+    INSTANCE_HANDLE_INVALID = "instance_handle_invalid"
+    WALLCLOCK_EXCEEDED = "wallclock_exceeded"
+    CONTAINER_INACTIVE = "container_inactive"
+
+
+@dataclass
+class LoginResponse:
+    success: bool
+    token: str | None
+    resp: str
+    password_expired: bool
+    password_expires_in_days: int | None
+    requires_password_change: bool
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LoginResponse":
+        return cls(
+            success=data["success"],
+            token=data.get("token"),
+            resp=data.get("resp", ""),
+            password_expired=data.get("password_expired", False),
+            password_expires_in_days=data.get("password_expires_in_days"),
+            requires_password_change=data.get("requires_password_change", False),
+        )
+
+
+@dataclass
+class ShareSyncOutput:
+    share_sync_path: str
+    share_sync_space_name: str | None
+    # null in list responses; present on get_job() — see §6 note
+    share_sync_base_url: str | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ShareSyncOutput":
+        return cls(
+            share_sync_path=data.get("shareSyncPath") or data.get("share_sync_path", ""),
+            share_sync_space_name=data.get("shareSyncSpaceName") or data.get("share_sync_space_name"),
+            share_sync_base_url=data.get("shareSyncBaseUrl") or data.get("share_sync_base_url"),
+        )
+
+
+@dataclass
+class ShareSyncInput:
+    share_sync_path: str
+    share_sync_space_name: str | None
+    share_sync_base_url: str | None
+    # Present only when inputPushMode='auto-prepare'
+    upload_url: str | None = None
+    upload_method: str | None = None
+    example_curl: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ShareSyncInput":
+        return cls(
+            share_sync_path=data.get("shareSyncPath") or data.get("share_sync_path", ""),
+            share_sync_space_name=data.get("shareSyncSpaceName") or data.get("share_sync_space_name"),
+            share_sync_base_url=data.get("shareSyncBaseUrl") or data.get("share_sync_base_url"),
+            upload_url=data.get("uploadUrl"),
+            upload_method=data.get("uploadMethod"),
+            example_curl=data.get("exampleCurl"),
+        )
+
+
+@dataclass
+class CreateJobResponse:
+    """Response shape from POST /api/compute/jobs (§12.4 CreateComputeJobResponse)."""
+
+    job_id: str
+    status: str
+    image_digest: str | None
+    output_share_sync_path: str
+    created_at: str
+    output: ShareSyncOutput
+    input: ShareSyncInput | None
+    queue_position: int | None = None
+    estimated_start_seconds: int | None = None
+    shm_size: str | None = None
+    notify_on_failure: bool | None = None
+    max_wall_clock_seconds: int | None = None
+    container_inactivity_seconds: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CreateJobResponse":
+        inp = data.get("input")
+        return cls(
+            job_id=data["jobId"],
+            status=data["status"],
+            image_digest=data.get("imageDigest"),
+            output_share_sync_path=data["outputShareSyncPath"],
+            created_at=data["createdAt"],
+            output=ShareSyncOutput.from_dict(data["output"]),
+            input=ShareSyncInput.from_dict(inp) if inp else None,
+            queue_position=data.get("queuePosition"),
+            estimated_start_seconds=data.get("estimatedStartSeconds"),
+            shm_size=data.get("shmSize"),
+            notify_on_failure=data.get("notifyOnFailure"),
+            max_wall_clock_seconds=data.get("maxWallClockSeconds"),
+            container_inactivity_seconds=data.get("containerInactivitySeconds"),
+        )
+
+
+@dataclass
+class Job:
+    """Full job row from GET /api/compute/jobs/:id (§12.5 ComputeJobApiShape).
+
+    The API returns fields in snake_case with some camelCase aliases; we normalise
+    to snake_case here.
+    """
+
+    id: str
+    image: str
+    command: list[str]
+    instance_type_name: str
+    mode: str
+    status: str
+    error_code: str | None
+    error_message: str | None
+    exit_code: int | None
+    created_at: str
+    output: ShareSyncOutput
+    input: ShareSyncInput | None
+    organisation_id: int | None = None
+    user_id: int | None = None
+    image_digest: str | None = None
+    started_provisioning_at: str | None = None
+    started_running_at: str | None = None
+    terminal_at: str | None = None
+    cancel_requested_at: str | None = None
+    cuda_version: str | None = None
+    driver_version: str | None = None
+    gpu_name: str | None = None
+    log_archive_share_sync_path: str | None = None
+    log_archive_uploaded_at: str | None = None
+    idle_hold_seconds: int | None = None
+    shm_size: str | None = None
+    notify_on_failure: bool | None = None
+    max_wall_clock_seconds: int | None = None
+    container_inactivity_seconds: int | None = None
+    queue_position: int | None = None
+    estimated_start_seconds: int | None = None
+    max_retries_on_interrupt: int | None = None
+    retries_used_on_interrupt: int | None = None
+    tags: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Job":
+        out = data.get("output") or {}
+        inp = data.get("input")
+        return cls(
+            id=data["id"],
+            image=data["image"],
+            command=data.get("command") or [],
+            instance_type_name=data.get("instance_type_name", ""),
+            mode=data.get("mode", "instant"),
+            status=data["status"],
+            error_code=data.get("error_code"),
+            error_message=data.get("error_message"),
+            exit_code=data.get("exit_code"),
+            created_at=data.get("created_at", ""),
+            output=ShareSyncOutput.from_dict(out) if out else ShareSyncOutput("", None, None),
+            input=ShareSyncInput.from_dict(inp) if inp else None,
+            organisation_id=data.get("organisation_id"),
+            user_id=data.get("user_id"),
+            image_digest=data.get("image_digest"),
+            started_provisioning_at=data.get("started_provisioning_at"),
+            started_running_at=data.get("started_running_at"),
+            terminal_at=data.get("terminal_at"),
+            cancel_requested_at=data.get("cancel_requested_at"),
+            cuda_version=data.get("cuda_version"),
+            driver_version=data.get("driver_version"),
+            gpu_name=data.get("gpu_name"),
+            log_archive_share_sync_path=data.get("log_archive_share_sync_path"),
+            log_archive_uploaded_at=data.get("log_archive_uploaded_at"),
+            idle_hold_seconds=data.get("idle_hold_seconds"),
+            # Both snake_case and camelCase aliases are present on job rows
+            shm_size=data.get("container_shm_size") or data.get("shmSize"),
+            notify_on_failure=data.get("notify_on_failure"),
+            max_wall_clock_seconds=data.get("max_wallclock_seconds") or data.get("maxWallClockSeconds"),
+            container_inactivity_seconds=data.get("container_inactivity_seconds") or data.get("containerInactivitySeconds"),
+            queue_position=data.get("queuePosition") or data.get("queue_position"),
+            estimated_start_seconds=data.get("estimatedStartSeconds") or data.get("estimated_start_seconds"),
+            max_retries_on_interrupt=data.get("max_retries_on_interrupt"),
+            retries_used_on_interrupt=data.get("retries_used_on_interrupt"),
+            tags=data.get("tags") or [],
+        )
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in TERMINAL_STATUSES
+
+
+@dataclass
+class EstimateRate:
+    billed_per_second_cents: str
+    billed_per_hour_usd: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "EstimateRate":
+        return cls(
+            billed_per_second_cents=data["billedPerSecondCents"],
+            billed_per_hour_usd=data["billedPerHourUsd"],
+        )
+
+
+@dataclass
+class EstimateTotal:
+    billable_seconds: int
+    total_cents: str
+    total_usd: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "EstimateTotal":
+        return cls(
+            billable_seconds=data["billableSeconds"],
+            total_cents=data["totalCents"],
+            total_usd=data["totalUsd"],
+        )
+
+
+@dataclass
+class EstimateResponse:
+    """Response from POST /api/compute/jobs/estimate (§2.8)."""
+
+    instance_type: str
+    mode: str
+    rate: EstimateRate
+    estimate: EstimateTotal | None
+    notes: list[str]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "EstimateResponse":
+        est = data.get("estimate")
+        return cls(
+            instance_type=data["instanceType"],
+            mode=data["mode"],
+            rate=EstimateRate.from_dict(data["rate"]),
+            estimate=EstimateTotal.from_dict(est) if est else None,
+            notes=data.get("notes", []),
+        )
+
+
+@dataclass
+class QueueStatusEvent:
+    """SSE event type 'queue.status' — emitted while job is queued/provisioning."""
+
+    status: str
+    queue_position: int | None
+    estimated_start_seconds: int | None
+    done: bool  # true when the job transitions to running or terminal
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "QueueStatusEvent":
+        return cls(
+            status=data["status"],
+            queue_position=data.get("queuePosition"),
+            estimated_start_seconds=data.get("estimatedStartSeconds"),
+            done=data.get("done", False),
+        )
+
+
+@dataclass
+class LogEvent:
+    """SSE event type 'log' — a single container log line."""
+
+    ts: str
+    stream: str   # "stdout" or "stderr"
+    line: str
+    phase: str    # "container" or provisioning phases
+    event_id: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], event_id: str | None = None) -> "LogEvent":
+        return cls(
+            ts=data["ts"],
+            stream=data["stream"],
+            line=data["line"],
+            phase=data.get("phase", "container"),
+            event_id=event_id,
+        )
+
+
+@dataclass
+class TruncatedEvent:
+    """SSE event type 'truncated' — server dropped some log lines."""
+
+    data: dict[str, Any]
+
+
+@dataclass
+class ShareSyncEntry:
+    """One entry from a WebDAV PROPFIND multistatus response."""
+
+    href: str
+    name: str
+    is_collection: bool
+    content_length: int | None = None
