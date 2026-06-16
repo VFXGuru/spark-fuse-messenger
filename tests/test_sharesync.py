@@ -208,6 +208,7 @@ def test_download_file_non_200_raises(tmp_path):
     http = MagicMock(spec=httpx.Client)
     mock_stream_resp = MagicMock()
     mock_stream_resp.status_code = 404
+    mock_stream_resp.is_success = False
     mock_stream_resp.__enter__ = MagicMock(return_value=mock_stream_resp)
     mock_stream_resp.__exit__ = MagicMock(return_value=False)
     http.stream.return_value = mock_stream_resp

@@ -41,7 +41,7 @@ class AuthManager:
         """
         url = f"{self._host}/auth/login"
         resp = client.post(url, json={"email": self._email, "password": self._password})
-        if resp.status_code != 200:
+        if not resp.is_success:
             raise SparkHttpError(resp.status_code, resp.text)
         data = resp.json()
         login_resp = LoginResponse.from_dict(data)

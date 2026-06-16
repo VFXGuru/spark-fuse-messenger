@@ -232,14 +232,14 @@ class SparkFuseClient:
         _opt(body, "containerInactivitySeconds", container_inactivity_seconds)
 
         resp = self._request("POST", "/api/compute/jobs", json=body)
-        if resp.status_code != 200:
+        if not resp.is_success:
             raise SparkHttpError(resp.status_code, resp.text)
         return CreateJobResponse.from_dict(resp.json())
 
     def get_job(self, job_id: str) -> Job:
         """GET /api/compute/jobs/{job_id} — full job row with resolved URLs (§5)."""
         resp = self._request("GET", f"/api/compute/jobs/{job_id}")
-        if resp.status_code != 200:
+        if not resp.is_success:
             raise SparkHttpError(resp.status_code, resp.text)
         return Job.from_dict(resp.json())
 
@@ -270,7 +270,7 @@ class SparkFuseClient:
             "/api/compute/jobs",
             params=params if params else None,
         )
-        if resp.status_code != 200:
+        if not resp.is_success:
             raise SparkHttpError(resp.status_code, resp.text)
         return [Job.from_dict(j) for j in resp.json().get("jobs", [])]
 
@@ -281,7 +281,7 @@ class SparkFuseClient:
         Cancel always skips any remaining idle-hold window.
         """
         resp = self._request("POST", f"/api/compute/jobs/{job_id}/cancel")
-        if resp.status_code != 200:
+        if not resp.is_success:
             raise SparkHttpError(resp.status_code, resp.text)
         return Job.from_dict(resp.json())
 
@@ -300,7 +300,7 @@ class SparkFuseClient:
     def list_skus(self) -> list[str]:
         """GET /api/compute/skus — eligible instance type names (§8)."""
         resp = self._request("GET", "/api/compute/skus")
-        if resp.status_code != 200:
+        if not resp.is_success:
             raise SparkHttpError(resp.status_code, resp.text)
         return resp.json().get("skus", [])
 
@@ -322,7 +322,7 @@ class SparkFuseClient:
         _opt(body, "idleHoldSeconds", idle_hold_seconds)
 
         resp = self._request("POST", "/api/compute/jobs/estimate", json=body)
-        if resp.status_code != 200:
+        if not resp.is_success:
             raise SparkHttpError(resp.status_code, resp.text)
         return EstimateResponse.from_dict(resp.json())
 

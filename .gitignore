@@ -11,4 +11,13 @@ build/
 .pytest_cache/
 outputs/
 downloads/
-spark-fuse-api-v119.md
+
+# Spark Fuse API docs (provided by Spark Cloud Studio, not redistributed)
+spark-fuse-api-*.md
+
+# Local job test artefacts
+diag*/
+test-input/
+test-output/
+verify/
+verify-roundtrip/

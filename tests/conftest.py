@@ -87,6 +87,7 @@ def mock_response(status_code: int, data: dict | list | None = None, text: str =
     """Build a mock httpx.Response."""
     resp = MagicMock(spec=httpx.Response)
     resp.status_code = status_code
+    resp.is_success = 200 <= status_code < 300
     if data is not None:
         resp.json.return_value = data
         resp.text = json.dumps(data)

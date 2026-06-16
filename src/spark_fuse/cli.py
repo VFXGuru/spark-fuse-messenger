@@ -9,6 +9,7 @@ from typing import Annotated, Optional
 import typer
 from dotenv import load_dotenv
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from .client import SparkFuseClient
@@ -70,8 +71,12 @@ def skus() -> None:
         sku_list = c.list_skus()
     table = Table(title="Available SKUs")
     table.add_column("Instance Type", style="cyan")
+    import json
     for sku in sku_list:
-        table.add_row(sku)
+        if isinstance(sku, dict):
+            table.add_row(json.dumps(sku))
+        else:
+            table.add_row(str(sku))
     console.print(table)
 
 
@@ -238,9 +243,12 @@ def logs(
                         console.print(f"[blue][queue][/blue] {event.status} — container starting")
                 elif isinstance(event, LogEvent):
                     color = "green" if event.stream == "stdout" else "yellow"
-                    console.print(f"[{color}][{event.stream}][/{color}] {event.line}")
+                    # Escape the log line: container output can contain '[...]'
+                    # (e.g. ComfyUI's '[/path/to/node]' lines) which Rich would
+                    # otherwise parse as markup and raise MarkupError.
+                    console.print(f"[{color}][{event.stream}][/{color}] {escape(event.line)}")
                 elif isinstance(event, TruncatedEvent):
-                    console.print(f"[red][truncated][/red] {event.data}")
+                    console.print(f"[red][truncated][/red] {escape(str(event.data))}")
         except KeyboardInterrupt:
             console.print("\n[yellow]Stream interrupted.[/yellow]")
 

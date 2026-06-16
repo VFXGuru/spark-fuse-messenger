@@ -147,7 +147,7 @@ def download_file(
         file_url,
         headers={"Authorization": f"Bearer {token}"},
     ) as resp:
-        if resp.status_code != 200:
+        if not resp.is_success:
             raise ShareSyncError(
                 f"GET {file_url} returned HTTP {resp.status_code}"
             )
