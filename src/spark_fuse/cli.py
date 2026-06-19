@@ -115,6 +115,11 @@ def submit(
     tag: Annotated[Optional[list[str]], typer.Option("--tag", help="Job tag (repeatable)")] = None,
     input_dir: Annotated[Optional[Path], typer.Option("--input-dir", help="Local dir to tar+upload (push workflow §3.1)")] = None,
     input_path: Annotated[Optional[str], typer.Option("--input-path", help="ShareSync path to mount (mount workflow §3.2)")] = None,
+    input_space: Annotated[Optional[str], typer.Option("--input-space", help="ShareSync Project for --input-path (omit = Personal)")] = None,
+    assets_path: Annotated[Optional[str], typer.Option("--assets-path", help="ShareSync path mounted read-only + lazy at /assets (model library §3.5)")] = None,
+    assets_space: Annotated[Optional[str], typer.Option("--assets-space", help="ShareSync Project for --assets-path (omit = Personal)")] = None,
+    image_affinity: Annotated[Optional[str], typer.Option("--image-affinity", help="preferred (default) or required (notify on cache miss)")] = None,
+    env: Annotated[Optional[list[str]], typer.Option("--env", help="Container env var KEY=VALUE (repeatable)")] = None,
 ) -> None:
     """Submit a compute job.
 
@@ -125,8 +130,23 @@ def submit(
       spark-fuse submit --image pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime \\
         --command bash -c "python3 /input/run.py" \\
         --instance-type g7e.2xlarge --input-dir ./my-scripts
+
+      spark-fuse submit --image ghcr.io/org/comfyui@sha256:... \\
+        --command python3.13 --command /runner/spark_fuse_run.py \\
+        --instance-type g7e.2xlarge --input-path /jobs/klein/ \\
+        --assets-path /comfy-flux2-klein/models --env MODEL_BASE_DIR=/assets \\
+        --image-affinity required
     """
     push_mode = "auto-prepare" if input_dir is not None else None
+    env_dict: Optional[dict[str, str]] = None
+    if env:
+        env_dict = {}
+        for item in env:
+            if "=" not in item:
+                err_console.print(f"[red]Invalid --env '{item}'. Use KEY=VALUE.[/red]")
+                raise typer.Exit(2)
+            key, value = item.split("=", 1)
+            env_dict[key] = value
     with _client() as c:
         c.login()
         resp = c.submit(
@@ -135,8 +155,13 @@ def submit(
             instance_type=instance_type,
             mode=mode,
             tags=tag or None,
+            env=env_dict,
             input_push_mode=push_mode,
             input_share_sync_path=input_path,
+            input_share_sync_space_name=input_space,
+            assets_share_sync_path=assets_path,
+            assets_share_sync_space_name=assets_space,
+            image_affinity=image_affinity,
         )
         console.print(f"[green]Job submitted:[/green] [cyan]{resp.job_id}[/cyan]")
         console.print(f"Status: {resp.status}")

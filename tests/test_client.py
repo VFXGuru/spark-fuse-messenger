@@ -138,6 +138,27 @@ def test_submit_push_mode_included():
     assert resp.input.upload_url == "https://files.example.com/upload/spark-input.tar.gz"
 
 
+def test_submit_assets_and_affinity_in_body():
+    http = MagicMock(spec=httpx.Client)
+    c = _authed_client(http)
+    http.request.return_value = mock_response(200, SUBMIT_RESPONSE)
+    c.submit(
+        image="ghcr.io/org/comfyui@sha256:abc",
+        command=["python3.13", "/runner/spark_fuse_run.py"],
+        instance_type="g7e.2xlarge",
+        env={"MODEL_BASE_DIR": "/assets"},
+        input_share_sync_path="/jobs/klein/",
+        assets_share_sync_path="/comfy-flux2-klein/models",
+        image_affinity="required",
+    )
+    _, kwargs = http.request.call_args
+    body = kwargs["json"]
+    assert body["assetsShareSyncPath"] == "/comfy-flux2-klein/models"
+    assert body["imageAffinity"] == "required"
+    assert body["env"] == {"MODEL_BASE_DIR": "/assets"}
+    assert body["inputShareSyncPath"] == "/jobs/klein/"
+
+
 # ------------------------------------------------------------------
 # get_job
 # ------------------------------------------------------------------

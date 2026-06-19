@@ -188,6 +188,9 @@ class SparkFuseClient:
         input_share_sync_path: str | None = None,
         input_share_sync_space_name: str | None = None,
         input_push_mode: str | None = None,
+        assets_share_sync_path: str | None = None,
+        assets_share_sync_space_name: str | None = None,
+        image_affinity: str | None = None,
         webhook_endpoint_id: str | None = None,
         idle_hold_seconds: int | None = None,
         shm_size: str | None = None,
@@ -204,6 +207,10 @@ class SparkFuseClient:
         Input workflows (mutually exclusive — server returns 400 if both given):
           input_push_mode='auto-prepare'   — server allocates an upload URL (§3.1)
           input_share_sync_path            — mount a pre-populated ShareSync path (§3.2)
+
+        assets_share_sync_path mounts a large, stable library read-only and lazily
+        at /assets, cached across jobs (§3.5); independent of and combinable with
+        the input workflow. image_affinity is 'preferred' (default) or 'required'.
 
         After an auto-prepare submit, call upload_input(local_dir, response.input.upload_url)
         within 5 minutes, otherwise the job fails with input_download_failed.
@@ -222,6 +229,9 @@ class SparkFuseClient:
         _opt(body, "inputShareSyncPath", input_share_sync_path)
         _opt(body, "inputShareSyncSpaceName", input_share_sync_space_name)
         _opt(body, "inputPushMode", input_push_mode)
+        _opt(body, "assetsShareSyncPath", assets_share_sync_path)
+        _opt(body, "assetsShareSyncSpaceName", assets_share_sync_space_name)
+        _opt(body, "imageAffinity", image_affinity)
         _opt(body, "webhookEndpointId", webhook_endpoint_id)
         _opt(body, "idleHoldSeconds", idle_hold_seconds)
         _opt(body, "shmSize", shm_size)
