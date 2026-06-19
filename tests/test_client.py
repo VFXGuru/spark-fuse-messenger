@@ -183,6 +183,50 @@ def test_get_job_non_terminal():
     assert job.is_terminal is False
 
 
+def test_get_job_parses_image_affinity_and_cache_hit():
+    http = MagicMock(spec=httpx.Client)
+    c = _authed_client(http)
+    row = {**JOB_RESPONSE, "imageAffinity": "required", "imageCacheHit": False}
+    http.request.return_value = mock_response(200, row)
+    job = c.get_job("abc12345-0000-0000-0000-000000000001")
+    assert job.image_affinity == "required"
+    # False (cold pull) must survive, not collapse to None
+    assert job.image_cache_hit is False
+
+
+# ------------------------------------------------------------------
+# sharesync
+# ------------------------------------------------------------------
+
+def test_sharesync_location():
+    http = MagicMock(spec=httpx.Client)
+    c = _authed_client(http)
+    http.request.return_value = mock_response(200, {
+        "filesHost": "ajoy.files.sparkcloud.studio",
+        "personal": {
+            "id": "x",
+            "name": "Personal",
+            "webDavBaseUrl": "https://ajoy.files.sparkcloud.studio/dav/spaces/x/",
+        },
+    })
+    loc = c.sharesync_location()
+    assert loc["filesHost"] == "ajoy.files.sparkcloud.studio"
+    assert loc["personal"]["webDavBaseUrl"].endswith("/dav/spaces/x/")
+
+
+def test_sharesync_projects():
+    http = MagicMock(spec=httpx.Client)
+    c = _authed_client(http)
+    http.request.return_value = mock_response(200, {
+        "filesHost": "ajoy.files.sparkcloud.studio",
+        "projects": [
+            {"id": "p1", "name": "Renders 2026", "webDavBaseUrl": "https://x/dav/spaces/p1/"},
+        ],
+    })
+    data = c.sharesync_projects()
+    assert data["projects"][0]["name"] == "Renders 2026"
+
+
 # ------------------------------------------------------------------
 # list_jobs
 # ------------------------------------------------------------------

@@ -207,6 +207,11 @@ def status(
     console.print(f"[cyan]Instance:[/cyan] {job.instance_type_name}")
     if job.gpu_name:
         console.print(f"[cyan]GPU:[/cyan]      {job.gpu_name}")
+    if job.image_affinity:
+        console.print(f"[cyan]Affinity:[/cyan] {job.image_affinity}")
+    if job.image_cache_hit is not None:
+        hit = "hit (image already cached)" if job.image_cache_hit else "miss (cold pull)"
+        console.print(f"[cyan]Img cache:[/cyan] {hit}")
     console.print(f"[cyan]Created:[/cyan]  {job.created_at}")
     if job.terminal_at:
         console.print(f"[cyan]Terminal:[/cyan] {job.terminal_at}")
@@ -313,3 +318,33 @@ def download(
             console.print(f"  {p}")
     else:
         console.print("[yellow]No files found at that URL.[/yellow]")
+
+
+sharesync_app = typer.Typer(help="Resolve your ShareSync location and Projects (§3.4).")
+app.add_typer(sharesync_app, name="sharesync")
+
+
+@sharesync_app.command("location")
+def sharesync_location() -> None:
+    """Show your files host and Personal-space WebDAV base URL (no prior job needed)."""
+    with _client() as c:
+        c.login()
+        loc = c.sharesync_location()
+    console.print(f"[cyan]Files host:[/cyan] {loc.get('filesHost')}")
+    personal = loc.get("personal") or {}
+    console.print(f"[cyan]Personal:[/cyan]   {personal.get('webDavBaseUrl')}")
+
+
+@sharesync_app.command("projects")
+def sharesync_projects() -> None:
+    """List your ShareSync Projects with their WebDAV base URLs."""
+    with _client() as c:
+        c.login()
+        data = c.sharesync_projects()
+    projects = data.get("projects") or []
+    table = Table(title=f"ShareSync Projects ({len(projects)})")
+    table.add_column("Name", style="cyan")
+    table.add_column("WebDAV base URL")
+    for proj in projects:
+        table.add_row(proj.get("name", ""), proj.get("webDavBaseUrl", ""))
+    console.print(table)

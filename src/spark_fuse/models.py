@@ -164,6 +164,8 @@ class Job:
     organisation_id: int | None = None
     user_id: int | None = None
     image_digest: str | None = None
+    image_cache_hit: bool | None = None
+    image_affinity: str | None = None
     started_provisioning_at: str | None = None
     started_running_at: str | None = None
     terminal_at: str | None = None
@@ -204,6 +206,9 @@ class Job:
             organisation_id=data.get("organisation_id"),
             user_id=data.get("user_id"),
             image_digest=data.get("image_digest"),
+            # imageCacheHit can be False (cold pull), so default-get rather than `or`
+            image_cache_hit=data.get("imageCacheHit", data.get("image_cache_hit")),
+            image_affinity=data.get("imageAffinity") or data.get("image_affinity"),
             started_provisioning_at=data.get("started_provisioning_at"),
             started_running_at=data.get("started_running_at"),
             terminal_at=data.get("terminal_at"),

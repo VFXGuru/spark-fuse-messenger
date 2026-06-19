@@ -336,6 +336,20 @@ class SparkFuseClient:
             raise SparkHttpError(resp.status_code, resp.text)
         return EstimateResponse.from_dict(resp.json())
 
+    def sharesync_location(self) -> dict[str, Any]:
+        """GET /api/sharesync/location — files host + Personal-space WebDAV base URL (§3.4)."""
+        resp = self._request("GET", "/api/sharesync/location")
+        if not resp.is_success:
+            raise SparkHttpError(resp.status_code, resp.text)
+        return resp.json()
+
+    def sharesync_projects(self) -> dict[str, Any]:
+        """GET /api/sharesync/projects — your ShareSync Projects + WebDAV base URLs (§3.4)."""
+        resp = self._request("GET", "/api/sharesync/projects")
+        if not resp.is_success:
+            raise SparkHttpError(resp.status_code, resp.text)
+        return resp.json()
+
     # ------------------------------------------------------------------
     # Input upload — push workflow (§3.1)
     # ------------------------------------------------------------------
