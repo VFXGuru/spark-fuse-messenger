@@ -24,6 +24,7 @@ from .models import (
     EstimateResponse,
     Job,
     LoginResponse,
+    PreparedInstance,
     ShareSyncEntry,
 )
 from .sharesync import download_file, file_url_from_entry, propfind, upload_directory
@@ -294,6 +295,45 @@ class SparkFuseClient:
         if not resp.is_success:
             raise SparkHttpError(resp.status_code, resp.text)
         return Job.from_dict(resp.json())
+
+    def prepare_instance(
+        self,
+        *,
+        instance_type: str,
+        hold_seconds: int,
+        mode: str | None = None,
+    ) -> PreparedInstance:
+        """POST /api/compute/instances/prepare — pre-warm a session (§13.1).
+
+        Returns immediately with status='preparing'; poll get_instance() until
+        status='ready' before routing jobs to the handle. Sessions are
+        InstantCompute only (mode='smart' returns HTTP 400). hold_seconds is the
+        maximum wall-clock the instance is held; the clock starts at 'ready' and
+        re-arms after each job, so it must comfortably cover the gaps between jobs.
+        """
+        body: dict[str, Any] = {"instanceType": instance_type, "holdSeconds": hold_seconds}
+        _opt(body, "mode", mode)
+        resp = self._request("POST", "/api/compute/instances/prepare", json=body)
+        if not resp.is_success:
+            raise SparkHttpError(resp.status_code, resp.text)
+        return PreparedInstance.from_dict(resp.json())
+
+    def get_instance(self, instance_handle: str) -> PreparedInstance:
+        """GET /api/compute/instances/{handle} — poll a session's status (§13.2)."""
+        resp = self._request("GET", f"/api/compute/instances/{instance_handle}")
+        if not resp.is_success:
+            raise SparkHttpError(resp.status_code, resp.text)
+        return PreparedInstance.from_dict(resp.json())
+
+    def release_instance(self, instance_handle: str) -> PreparedInstance:
+        """POST /api/compute/instances/{handle}/release — tear down a session (§13.3).
+
+        Idempotent: releasing an already-terminal session returns its current state.
+        """
+        resp = self._request("POST", f"/api/compute/instances/{instance_handle}/release")
+        if not resp.is_success:
+            raise SparkHttpError(resp.status_code, resp.text)
+        return PreparedInstance.from_dict(resp.json())
 
     def stream_logs(self, job_id: str) -> Generator[SSEEvent, None, None]:
         """GET /api/compute/jobs/{job_id}/logs/stream as SSE (§4).

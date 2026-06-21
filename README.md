@@ -79,7 +79,16 @@ spark-fuse cancel <job-id>
 
 # Download all output files
 spark-fuse download <job-id> ./outputs
+
+# Persistent-compute sessions: pre-warm one instance and run jobs back to back (§13)
+spark-fuse instance prepare g7e.2xlarge --hold-seconds 1800   # prints a handle
+spark-fuse instance status <handle>                           # poll until 'ready'
+spark-fuse instance release <handle>                          # tear down
 ```
+
+Submit jobs onto a prepared session by passing the handle: `spark-fuse submit
+... --instance-handle <handle>` (or `instance_handle=` on `client.submit`). Each
+job lands on that same warm instance with no cold start.
 
 ## Python API
 

@@ -236,6 +236,61 @@ class Job:
         return self.status in TERMINAL_STATUSES
 
 
+SESSION_TERMINAL_STATUSES: frozenset[str] = frozenset({"released", "expired", "failed"})
+
+
+@dataclass
+class PreparedInstance:
+    """A persistent-compute session (§13).
+
+    Same shape is returned by POST /api/compute/instances/prepare,
+    GET /api/compute/instances/{handle}, and the release endpoint. Statuses:
+    preparing -> ready -> running -> ready ... then a terminal released/expired/failed.
+    """
+
+    instance_handle: str
+    status: str
+    instance_type: str | None = None
+    hold_seconds: int | None = None
+    prepared_at: str | None = None
+    ready_at: str | None = None
+    released_at: str | None = None
+    expired_at: str | None = None
+    failed_at: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    expires_at: str | None = None
+    first_job_id: str | None = None
+    last_job_id: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "PreparedInstance":
+        return cls(
+            instance_handle=data.get("instanceHandle") or data.get("instance_handle", ""),
+            status=data.get("status", ""),
+            instance_type=data.get("instanceType") or data.get("instance_type"),
+            hold_seconds=data.get("holdSeconds") if data.get("holdSeconds") is not None else data.get("hold_seconds"),
+            prepared_at=data.get("preparedAt") or data.get("prepared_at"),
+            ready_at=data.get("readyAt") or data.get("ready_at"),
+            released_at=data.get("releasedAt") or data.get("released_at"),
+            expired_at=data.get("expiredAt") or data.get("expired_at"),
+            failed_at=data.get("failedAt") or data.get("failed_at"),
+            error_code=data.get("errorCode") or data.get("error_code"),
+            error_message=data.get("errorMessage") or data.get("error_message"),
+            expires_at=data.get("expiresAt") or data.get("expires_at"),
+            first_job_id=data.get("firstJobId") or data.get("first_job_id"),
+            last_job_id=data.get("lastJobId") or data.get("last_job_id"),
+        )
+
+    @property
+    def is_ready(self) -> bool:
+        return self.status == "ready"
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in SESSION_TERMINAL_STATUSES
+
+
 @dataclass
 class EstimateRate:
     billed_per_second_cents: str

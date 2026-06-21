@@ -119,6 +119,7 @@ def submit(
     assets_path: Annotated[Optional[str], typer.Option("--assets-path", help="ShareSync path mounted read-only + lazy at /assets (model library §3.5)")] = None,
     assets_space: Annotated[Optional[str], typer.Option("--assets-space", help="ShareSync Project for --assets-path (omit = Personal)")] = None,
     image_affinity: Annotated[Optional[str], typer.Option("--image-affinity", help="preferred (default) or required (notify on cache miss)")] = None,
+    instance_handle: Annotated[Optional[str], typer.Option("--instance-handle", help="Route onto a prepared warm session (§13); see 'spark-fuse instance prepare')")] = None,
     env: Annotated[Optional[list[str]], typer.Option("--env", help="Container env var KEY=VALUE (repeatable)")] = None,
 ) -> None:
     """Submit a compute job.
@@ -162,6 +163,7 @@ def submit(
             assets_share_sync_path=assets_path,
             assets_share_sync_space_name=assets_space,
             image_affinity=image_affinity,
+            instance_handle=instance_handle,
         )
         console.print(f"[green]Job submitted:[/green] [cyan]{resp.job_id}[/cyan]")
         console.print(f"Status: {resp.status}")
@@ -318,6 +320,54 @@ def download(
             console.print(f"  {p}")
     else:
         console.print("[yellow]No files found at that URL.[/yellow]")
+
+
+instance_app = typer.Typer(help="Persistent-compute sessions: pre-warm an instance and run jobs back to back (§13).")
+app.add_typer(instance_app, name="instance")
+
+
+def _print_session(sess) -> None:
+    colour = {"ready": "green", "running": "cyan", "preparing": "yellow"}.get(sess.status, "white")
+    console.print(f"Handle: [cyan]{sess.instance_handle}[/cyan]")
+    console.print(f"Status: [{colour}]{sess.status}[/{colour}]  ({sess.instance_type or '?'})")
+    if sess.expires_at:
+        console.print(f"Expires at: {sess.expires_at}")
+    if sess.error_code:
+        console.print(f"[red]Error:[/red] {sess.error_code} {sess.error_message or ''}")
+
+
+@instance_app.command("prepare")
+def instance_prepare(
+    instance_type: Annotated[str, typer.Argument(help="Instance type SKU, e.g. g7e.2xlarge")],
+    hold_seconds: Annotated[int, typer.Option("--hold-seconds", help="Max wall-clock to keep the instance held (clock starts at ready).")] = 1800,
+) -> None:
+    """Pre-warm an Instant-mode instance and print its session handle."""
+    with _client() as c:
+        c.login()
+        sess = c.prepare_instance(instance_type=instance_type, hold_seconds=hold_seconds)
+    _print_session(sess)
+
+
+@instance_app.command("status")
+def instance_status(
+    handle: Annotated[str, typer.Argument(help="Session instance handle")],
+) -> None:
+    """Poll a session's current status."""
+    with _client() as c:
+        c.login()
+        sess = c.get_instance(handle)
+    _print_session(sess)
+
+
+@instance_app.command("release")
+def instance_release(
+    handle: Annotated[str, typer.Argument(help="Session instance handle")],
+) -> None:
+    """Release a session (idempotent); the instance stops and billing ends."""
+    with _client() as c:
+        c.login()
+        sess = c.release_instance(handle)
+    console.print(f"[yellow]Release requested.[/yellow] Status: {sess.status}")
 
 
 sharesync_app = typer.Typer(help="Resolve your ShareSync location and Projects (§3.4).")

@@ -83,6 +83,24 @@ ESTIMATE_RESPONSE = {
 }
 
 
+PREPARE_RESPONSE = {
+    "instanceHandle": "b41f8a17-4c8a-46e7-8d5b-2c8e0d4f6f02",
+    "status": "preparing",
+    "instanceType": "g7e.2xlarge",
+    "holdSeconds": 1800,
+    "preparedAt": "2026-01-01T00:00:00.000Z",
+    "readyAt": None,
+    "releasedAt": None,
+    "expiredAt": None,
+    "failedAt": None,
+    "errorCode": None,
+    "errorMessage": None,
+    "expiresAt": "2026-01-01T00:30:00.000Z",
+    "firstJobId": None,
+    "lastJobId": None,
+}
+
+
 def mock_response(status_code: int, data: dict | list | None = None, text: str = "") -> MagicMock:
     """Build a mock httpx.Response."""
     resp = MagicMock(spec=httpx.Response)

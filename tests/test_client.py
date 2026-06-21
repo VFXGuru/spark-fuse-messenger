@@ -18,6 +18,7 @@ from tests.conftest import (
     HOST,
     JOB_RESPONSE,
     LOGIN_OK,
+    PREPARE_RESPONSE,
     SKUS_RESPONSE,
     SUBMIT_RESPONSE,
     make_client,
@@ -75,6 +76,45 @@ def test_estimate_rate_only_when_no_runtime():
     http.request.return_value = mock_response(200, rate_only_resp)
     result = c.estimate(instance_type="g4dn.xlarge")
     assert result.estimate is None
+
+
+# ------------------------------------------------------------------
+# sessions (prepare / get / release)
+# ------------------------------------------------------------------
+
+def test_prepare_instance_parses_and_sends_body():
+    http = MagicMock(spec=httpx.Client)
+    c = _authed_client(http)
+    http.request.return_value = mock_response(200, PREPARE_RESPONSE)
+    sess = c.prepare_instance(instance_type="g7e.2xlarge", hold_seconds=1800)
+    assert sess.instance_handle == PREPARE_RESPONSE["instanceHandle"]
+    assert sess.status == "preparing"
+    assert not sess.is_ready
+    assert not sess.is_terminal
+    args, kwargs = http.request.call_args
+    assert args[0] == "POST"
+    assert args[1].endswith("/api/compute/instances/prepare")
+    assert kwargs["json"] == {"instanceType": "g7e.2xlarge", "holdSeconds": 1800}
+
+
+def test_get_instance_ready_and_terminal():
+    http = MagicMock(spec=httpx.Client)
+    c = _authed_client(http)
+    http.request.return_value = mock_response(200, {**PREPARE_RESPONSE, "status": "ready"})
+    assert c.get_instance("h1").is_ready
+    http.request.return_value = mock_response(200, {**PREPARE_RESPONSE, "status": "released"})
+    assert c.get_instance("h1").is_terminal
+
+
+def test_release_instance():
+    http = MagicMock(spec=httpx.Client)
+    c = _authed_client(http)
+    http.request.return_value = mock_response(200, {**PREPARE_RESPONSE, "status": "released"})
+    sess = c.release_instance("h1")
+    assert sess.status == "released"
+    args, _ = http.request.call_args
+    assert args[0] == "POST"
+    assert args[1].endswith("/api/compute/instances/h1/release")
 
 
 # ------------------------------------------------------------------
