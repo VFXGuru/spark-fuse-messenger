@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "spark-fuse"
+name = "spark-fuse-messenger"
 version = "0.3.0"
 description = "Python client library for the Spark Fuse GPU compute API"
 readme = "README.md"
