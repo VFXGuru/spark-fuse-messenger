@@ -8,23 +8,30 @@ ShareSync — all from Python or the command line.
 ## Requirements
 
 - Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (`pip install uv`)
 - A Spark Fuse account with API credentials
 
-## API reference
+## Installation
 
-This client implements the Spark Fuse REST API. The API is documented in
-`spark-fuse-api-v119.md`, a file provided by Spark Cloud Studio to its customers.
-That document is **not redistributed in this repo**. If you want to reference it
-locally, place your own copy in the project root.
+Install from PyPI:
 
-## Setup
+```powershell
+pip install spark-fuse-messenger
+```
+
+Or clone and run from source with [uv](https://docs.astral.sh/uv/):
 
 ```powershell
 git clone https://github.com/VFXGuru/spark-fuse-messenger
 cd spark-fuse-messenger
 uv sync
 ```
+
+## API reference
+
+This client implements the Spark Fuse REST API. The API is documented in
+`spark-fuse-api-v124.md`, a file provided by Spark Cloud Studio to its customers.
+That document is **not redistributed in this repo**. If you want to reference it
+locally, place your own copy in the project root.
 
 Copy `.env.example` to `.env` and fill in your credentials:
 
