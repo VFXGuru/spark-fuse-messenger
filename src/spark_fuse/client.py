@@ -20,6 +20,7 @@ from .errors import (
 from .logs import SSEEvent
 from .logs import stream_logs as _stream_logs
 from .models import (
+    AppendJobsResponse,
     CreateJobResponse,
     EstimateResponse,
     Job,
@@ -334,6 +335,32 @@ class SparkFuseClient:
         if not resp.is_success:
             raise SparkHttpError(resp.status_code, resp.text)
         return PreparedInstance.from_dict(resp.json())
+
+    def append_instance_jobs(
+        self,
+        instance_handle: str,
+        jobs: list[dict[str, Any]],
+        *,
+        halt_on_failure: bool | None = None,
+    ) -> AppendJobsResponse:
+        """POST /api/compute/instances/{handle}/jobs — queue jobs on a prepared instance (§13.6).
+
+        Each entry in *jobs* is a normal job-submit body minus ``instanceHandle`` and
+        ``mode`` (both are fixed by the session). ``instanceType`` is optional but must
+        match the session's SKU if supplied.  All specs are validated atomically — if any
+        one is invalid the whole batch is rejected and nothing is queued.
+
+        halt_on_failure: when True, the first job to end ``failed`` cancels all
+        remaining pending jobs with ``queue_halted_on_failure``.  Default False.
+        """
+        body: dict[str, Any] = {"jobs": jobs}
+        _opt(body, "haltOnFailure", halt_on_failure)
+        resp = self._request(
+            "POST", f"/api/compute/instances/{instance_handle}/jobs", json=body
+        )
+        if not resp.is_success:
+            raise SparkHttpError(resp.status_code, resp.text)
+        return AppendJobsResponse.from_dict(resp.json())
 
     def stream_logs(self, job_id: str) -> Generator[SSEEvent, None, None]:
         """GET /api/compute/jobs/{job_id}/logs/stream as SSE (§4).

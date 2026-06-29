@@ -352,11 +352,80 @@ def instance_prepare(
 def instance_status(
     handle: Annotated[str, typer.Argument(help="Session instance handle")],
 ) -> None:
-    """Poll a session's current status."""
+    """Poll a session's current status, including queue depth."""
     with _client() as c:
         c.login()
         sess = c.get_instance(handle)
     _print_session(sess)
+    q = sess.queue
+    if q and (q.running or q.pending or q.completed):
+        console.print(f"[cyan]Queue depth:[/cyan] {q.depth}  halt_on_failure={sess.halt_on_failure}")
+        if q.running:
+            console.print(f"  [yellow]running:[/yellow] {q.running.job_id}  pos={q.running.position}")
+        for p in q.pending:
+            console.print(f"  [blue]pending:[/blue] {p.job_id}  pos={p.position}")
+        for done in q.completed:
+            console.print(f"  [dim]done:[/dim]    {done.job_id}  status={done.status}")
+
+
+@instance_app.command("enqueue")
+def instance_enqueue(
+    handle: Annotated[str, typer.Argument(help="Session instance handle")],
+    image: Annotated[str, typer.Option("--image", "-i", help="Docker image reference")],
+    command: Annotated[list[str], typer.Option("--command", "-c", help="Command tokens (pass once per token)")],
+    instance_type: Annotated[Optional[str], typer.Option("--instance-type", "-t", help="SKU — must match the session's SKU if supplied")] = None,
+    tag: Annotated[Optional[list[str]], typer.Option("--tag", help="Job tag (repeatable)")] = None,
+    input_path: Annotated[Optional[str], typer.Option("--input-path", help="ShareSync mount path (§3.2)")] = None,
+    input_space: Annotated[Optional[str], typer.Option("--input-space", help="ShareSync Project for --input-path")] = None,
+    assets_path: Annotated[Optional[str], typer.Option("--assets-path", help="ShareSync asset library path mounted at /assets (§3.5)")] = None,
+    assets_space: Annotated[Optional[str], typer.Option("--assets-space", help="ShareSync Project for --assets-path")] = None,
+    env: Annotated[Optional[list[str]], typer.Option("--env", help="Container env var KEY=VALUE (repeatable)")] = None,
+    halt_on_failure: Annotated[bool, typer.Option("--halt-on-failure/--no-halt-on-failure", help="Cancel remaining pending jobs if this one fails")] = False,
+) -> None:
+    """Append a job to a prepared instance's queue (§13.6).
+
+    The session can be in preparing, ready, or running state — jobs are enqueued and
+    dispatched automatically once the slot is free.  Use 'spark-fuse submit
+    --instance-handle <handle>' for the same single-job path without the queue options.
+
+    Example:
+
+      spark-fuse instance enqueue <handle> --image pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime \\
+        --command python3 --command /input/train.py --input-path /training-data/
+    """
+    job_spec: dict = {"image": image, "command": command}
+    if instance_type:
+        job_spec["instanceType"] = instance_type
+    if tag:
+        job_spec["tags"] = tag
+    if input_path:
+        job_spec["inputShareSyncPath"] = input_path
+    if input_space:
+        job_spec["inputShareSyncSpaceName"] = input_space
+    if assets_path:
+        job_spec["assetsShareSyncPath"] = assets_path
+    if assets_space:
+        job_spec["assetsShareSyncSpaceName"] = assets_space
+    if env:
+        env_dict: dict = {}
+        for item in env:
+            if "=" not in item:
+                err_console.print(f"[red]Invalid --env '{item}'. Use KEY=VALUE.[/red]")
+                raise typer.Exit(2)
+            key, value = item.split("=", 1)
+            env_dict[key] = value
+        job_spec["env"] = env_dict
+
+    with _client() as c:
+        c.login()
+        resp = c.append_instance_jobs(
+            handle,
+            [job_spec],
+            halt_on_failure=True if halt_on_failure else None,
+        )
+    console.print(f"[green]Job queued.[/green] Queue depth: {resp.queue_depth}  halt_on_failure={resp.halt_on_failure}")
+    for ref in resp.accepted:
+        console.print(f"  [{ref.queue_state}] [cyan]{ref.job_id}[/cyan]  position={ref.queue_position}")
 
 
 @instance_app.command("release")

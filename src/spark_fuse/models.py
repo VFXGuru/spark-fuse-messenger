@@ -42,6 +42,10 @@ class ErrorCode(str, Enum):
     INSTANCE_HANDLE_INVALID = "instance_handle_invalid"
     WALLCLOCK_EXCEEDED = "wallclock_exceeded"
     CONTAINER_INACTIVE = "container_inactive"
+    # v1.24 queue error codes (§13.6)
+    QUEUE_HALTED_ON_FAILURE = "queue_halted_on_failure"
+    QUEUE_RELEASED = "queue_released"
+    SESSION_MAX_DURATION_EXCEEDED = "session_max_duration_exceeded"
 
 
 @dataclass
@@ -185,6 +189,9 @@ class Job:
     max_retries_on_interrupt: int | None = None
     retries_used_on_interrupt: int | None = None
     tags: list[str] = field(default_factory=list)
+    # v1.24 queue fields — set when this job was submitted via a prepared-instance queue
+    instance_queue_position: int | None = None
+    instance_queue_state: str | None = None  # "dispatched" | "pending" | None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Job":
@@ -229,6 +236,8 @@ class Job:
             max_retries_on_interrupt=data.get("max_retries_on_interrupt"),
             retries_used_on_interrupt=data.get("retries_used_on_interrupt"),
             tags=data.get("tags") or [],
+            instance_queue_position=data.get("instanceQueuePosition") or data.get("instance_queue_position"),
+            instance_queue_state=data.get("instanceQueueState") or data.get("instance_queue_state"),
         )
 
     @property
@@ -262,9 +271,13 @@ class PreparedInstance:
     expires_at: str | None = None
     first_job_id: str | None = None
     last_job_id: str | None = None
+    # v1.24 queue fields (§13.6)
+    halt_on_failure: bool | None = None
+    queue: "InstanceQueue | None" = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PreparedInstance":
+        queue_raw = data.get("queue")
         return cls(
             instance_handle=data.get("instanceHandle") or data.get("instance_handle", ""),
             status=data.get("status", ""),
@@ -280,6 +293,8 @@ class PreparedInstance:
             expires_at=data.get("expiresAt") or data.get("expires_at"),
             first_job_id=data.get("firstJobId") or data.get("first_job_id"),
             last_job_id=data.get("lastJobId") or data.get("last_job_id"),
+            halt_on_failure=data.get("haltOnFailure"),
+            queue=InstanceQueue.from_dict(queue_raw) if queue_raw else None,
         )
 
     @property
@@ -386,6 +401,81 @@ class TruncatedEvent:
     """SSE event type 'truncated' — server dropped some log lines."""
 
     data: dict[str, Any]
+
+
+@dataclass
+class QueuedJobRef:
+    """One accepted job entry in an AppendJobsResponse (§13.6)."""
+
+    job_id: str
+    queue_position: int | None
+    queue_state: str   # "dispatched" | "pending"
+    status: str        # always "queued" at accept time
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "QueuedJobRef":
+        return cls(
+            job_id=data.get("jobId", ""),
+            queue_position=data.get("queuePosition"),
+            queue_state=data.get("queueState", ""),
+            status=data.get("status", "queued"),
+        )
+
+
+@dataclass
+class InstanceQueueEntry:
+    """One job listed in an InstanceQueue (running / pending / completed slot)."""
+
+    job_id: str
+    position: int | None
+    status: str | None = None   # only populated for completed entries
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "InstanceQueueEntry":
+        return cls(
+            job_id=data.get("jobId", ""),
+            position=data.get("position"),
+            status=data.get("status"),
+        )
+
+
+@dataclass
+class InstanceQueue:
+    """Queue state returned by GET /api/compute/instances/:handle (§13.6)."""
+
+    depth: int
+    running: InstanceQueueEntry | None
+    pending: list[InstanceQueueEntry]
+    completed: list[InstanceQueueEntry]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "InstanceQueue":
+        running_raw = data.get("running")
+        return cls(
+            depth=data.get("depth", 0),
+            running=InstanceQueueEntry.from_dict(running_raw) if running_raw else None,
+            pending=[InstanceQueueEntry.from_dict(e) for e in data.get("pending", [])],
+            completed=[InstanceQueueEntry.from_dict(e) for e in data.get("completed", [])],
+        )
+
+
+@dataclass
+class AppendJobsResponse:
+    """Response from POST /api/compute/instances/:handle/jobs (§13.6)."""
+
+    instance_handle: str
+    accepted: list[QueuedJobRef]
+    queue_depth: int
+    halt_on_failure: bool
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AppendJobsResponse":
+        return cls(
+            instance_handle=data.get("instanceHandle", ""),
+            accepted=[QueuedJobRef.from_dict(j) for j in data.get("accepted", [])],
+            queue_depth=data.get("queueDepth", 0),
+            halt_on_failure=data.get("haltOnFailure", False),
+        )
 
 
 @dataclass
