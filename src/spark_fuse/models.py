@@ -24,6 +24,15 @@ TERMINAL_STATUSES: frozenset[str] = frozenset({
 })
 
 
+class SessionStatus(str, Enum):
+    PREPARING = "preparing"
+    READY = "ready"
+    RUNNING = "running"
+    RELEASED = "released"
+    EXPIRED = "expired"
+    FAILED = "failed"
+
+
 class ErrorCode(str, Enum):
     IMAGE_PULL_FAILED = "image_pull_failed"
     DISK_FULL = "disk_full"

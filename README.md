@@ -119,6 +119,53 @@ with SparkFuseClient(host="...", email="...", password="...") as client:
     print(job.status, job.exit_code)
 ```
 
+## Sessions (warm-instance pool)
+
+Pre-warm a single instance and route several jobs to it so each job skips the
+cold start and image pull. The `hold_seconds` clock starts when the instance
+becomes `ready` and re-arms after each job, so it is an idle ceiling, not a
+total-session ceiling.
+
+```python
+from spark_fuse import SparkFuseClient
+
+with SparkFuseClient(host="...", email="...", password="...") as client:
+    client.login()
+
+    # context manager: prepare -> wait_until_ready -> yield -> release
+    with client.session(instance_type="g7e.2xlarge", hold_seconds=600) as sess:
+        handle = sess.instance_handle
+        for workflow in my_workflows:
+            resp = client.submit(..., instance_handle=handle)
+            # poll resp.job_id to completion as normal
+```
+
+Or manage the lifecycle manually:
+
+```python
+sess = client.prepare_instance(instance_type="g7e.2xlarge", hold_seconds=600)
+sess = client.wait_until_ready(sess.instance_handle)   # polls until ready
+# ... submit jobs with instance_handle=sess.instance_handle ...
+client.release_instance(sess.instance_handle)
+```
+
+**Error types** — `from spark_fuse import ...`:
+
+| Exception | When raised |
+|---|---|
+| `NoWarmPoolCapacityError` | `prepare_instance` returns HTTP 503 (no warm pool slot available) |
+| `SessionFailedError` | Instance reaches terminal `failed` status |
+| `SessionNotFoundError` | `get_instance` or `release_instance` returns HTTP 404 |
+| `SessionConflictError` | `release_instance` returns HTTP 409 (state conflict) |
+| `SessionError` | Base class for all of the above |
+
+**Session affinity in the ComfyUI bridge** — the bridge's render queue accepts a
+`session_affinity` setting (`"preferred"` or `"required"`). With `"preferred"`
+(the default), the queue retries on `NoWarmPoolCapacityError` and falls back to
+independent submits if no slot becomes available. With `"required"`, it aborts
+the queue instead of falling back. An explicit `"off"` mode (always independent
+submits, never attempt prepare) is a known future toggle, not yet implemented.
+
 ## Running tests
 
 All tests mock HTTP — no network calls required:

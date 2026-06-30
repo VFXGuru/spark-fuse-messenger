@@ -3,8 +3,13 @@ from .client import SparkFuseClient
 from .errors import (
     AuthError,
     ForbiddenError,
+    NoWarmPoolCapacityError,
     RateLimitError,
     ServiceUnavailableError,
+    SessionConflictError,
+    SessionError,
+    SessionFailedError,
+    SessionNotFoundError,
     ShareSyncError,
     SparkFuseError,
     SparkHttpError,
@@ -25,6 +30,7 @@ from .models import (
     QueuedJobRef,
     QueueStatusEvent,
     SESSION_TERMINAL_STATUSES,
+    SessionStatus,
     TERMINAL_STATUSES,
     TruncatedEvent,
 )
@@ -34,8 +40,13 @@ __all__ = [
     # errors
     "AuthError",
     "ForbiddenError",
+    "NoWarmPoolCapacityError",
     "RateLimitError",
     "ServiceUnavailableError",
+    "SessionConflictError",
+    "SessionError",
+    "SessionFailedError",
+    "SessionNotFoundError",
     "ShareSyncError",
     "SparkFuseError",
     "SparkHttpError",
@@ -55,6 +66,7 @@ __all__ = [
     "QueuedJobRef",
     "QueueStatusEvent",
     "SESSION_TERMINAL_STATUSES",
+    "SessionStatus",
     "TERMINAL_STATUSES",
     "TruncatedEvent",
 ]

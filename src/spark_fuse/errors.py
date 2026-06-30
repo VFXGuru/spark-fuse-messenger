@@ -48,3 +48,29 @@ class ServiceUnavailableError(SparkFuseError):
 
 class ShareSyncError(SparkFuseError):
     """WebDAV / ShareSync operation failed."""
+
+
+class SessionError(SparkFuseError):
+    """Base class for session (prepared-instance) errors."""
+
+
+class NoWarmPoolCapacityError(SessionError):
+    """No warm-pool capacity available (HTTP 503 on prepare)."""
+
+
+class SessionFailedError(SessionError):
+    """Session entered a terminal 'failed' state."""
+
+    def __init__(self, error_code: str | None, error_message: str | None) -> None:
+        self.error_code = error_code
+        self.error_message = error_message
+        detail = " ".join(filter(None, [error_code, error_message])) or "session failed"
+        super().__init__(f"Session failed: {detail}")
+
+
+class SessionNotFoundError(SessionError):
+    """Session handle not found (HTTP 404)."""
+
+
+class SessionConflictError(SessionError):
+    """Session state conflict (HTTP 409); the session may already be released."""

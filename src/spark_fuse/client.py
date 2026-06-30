@@ -1,19 +1,26 @@
 """Main SparkFuseClient — credentials + all API operations in one place."""
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 from .auth import AuthManager
 from .errors import (
     ForbiddenError,
+    NoWarmPoolCapacityError,
     RateLimitError,
     ServiceUnavailableError,
+    SessionConflictError,
+    SessionError,
+    SessionFailedError,
+    SessionNotFoundError,
     SparkHttpError,
     TokenExpiredError,
 )
@@ -106,6 +113,7 @@ class SparkFuseClient:
         path: str,
         *,
         _retry_auth: bool = True,
+        _retry_503: bool = True,
         **kwargs: Any,
     ) -> httpx.Response:
         """Authenticated request with 401 re-login, 429, and 503 handling.
@@ -153,6 +161,8 @@ class SparkFuseClient:
                 raise RateLimitError(_parse_retry_after(resp))
 
             if resp.status_code == 503:
+                if not _retry_503:
+                    return resp  # caller (e.g. prepare_instance) handles its own 503
                 if attempt < _MAX_503_RETRIES:
                     wait = _503_BACKOFF_BASE * (2 ** attempt)
                     log.warning(
@@ -311,17 +321,51 @@ class SparkFuseClient:
         InstantCompute only (mode='smart' returns HTTP 400). hold_seconds is the
         maximum wall-clock the instance is held; the clock starts at 'ready' and
         re-arms after each job, so it must comfortably cover the gaps between jobs.
+
+        Raises NoWarmPoolCapacityError on HTTP 503 (no eligible warm compute right now).
+        Raises SparkHttpError with the error_code embedded in the message on HTTP 400
+        (smart_mode_not_supported / invalid_hold_seconds / ineligible SKU).
+        Raises SessionFailedError on HTTP 500.
         """
         body: dict[str, Any] = {"instanceType": instance_type, "holdSeconds": hold_seconds}
         _opt(body, "mode", mode)
-        resp = self._request("POST", "/api/compute/instances/prepare", json=body)
+        resp = self._request("POST", "/api/compute/instances/prepare", json=body,
+                             _retry_503=False)
+        if resp.status_code == 503:
+            raise NoWarmPoolCapacityError(
+                "No warm-pool capacity available for this instance type right now; "
+                "retry later or use session_affinity='preferred' to fall back to "
+                "independent submits"
+            )
+        if resp.status_code == 400:
+            try:
+                body_json = resp.json()
+                error_code = body_json.get("error_code") or body_json.get("errorCode") or ""
+            except Exception:
+                error_code = ""
+            detail = f"{error_code}: {resp.text[:200]}" if error_code else resp.text[:200]
+            raise SparkHttpError(resp.status_code, detail)
+        if resp.status_code == 500:
+            try:
+                body_json = resp.json()
+                error_code = body_json.get("error_code") or body_json.get("errorCode") or None
+                error_message = (body_json.get("error_message") or
+                                 body_json.get("errorMessage") or None)
+            except Exception:
+                error_code = error_message = None
+            raise SessionFailedError(error_code, error_message)
         if not resp.is_success:
             raise SparkHttpError(resp.status_code, resp.text)
         return PreparedInstance.from_dict(resp.json())
 
     def get_instance(self, instance_handle: str) -> PreparedInstance:
-        """GET /api/compute/instances/{handle} — poll a session's status (§13.2)."""
+        """GET /api/compute/instances/{handle} — poll a session's status (§13.2).
+
+        Raises SessionNotFoundError on HTTP 404.
+        """
         resp = self._request("GET", f"/api/compute/instances/{instance_handle}")
+        if resp.status_code == 404:
+            raise SessionNotFoundError(f"Instance {instance_handle!r} not found")
         if not resp.is_success:
             raise SparkHttpError(resp.status_code, resp.text)
         return PreparedInstance.from_dict(resp.json())
@@ -330,11 +374,83 @@ class SparkFuseClient:
         """POST /api/compute/instances/{handle}/release — tear down a session (§13.3).
 
         Idempotent: releasing an already-terminal session returns its current state.
+        Raises SessionNotFoundError on HTTP 404.
+        Raises SessionConflictError on HTTP 409 (state conflict; may already be released).
         """
         resp = self._request("POST", f"/api/compute/instances/{instance_handle}/release")
+        if resp.status_code == 404:
+            raise SessionNotFoundError(f"Instance {instance_handle!r} not found")
+        if resp.status_code == 409:
+            raise SessionConflictError(
+                f"Instance {instance_handle!r} state conflict; it may already be released"
+            )
         if not resp.is_success:
             raise SparkHttpError(resp.status_code, resp.text)
         return PreparedInstance.from_dict(resp.json())
+
+    def wait_until_ready(
+        self,
+        instance_handle: str,
+        *,
+        timeout: float = 660.0,
+        poll_interval: float = 3.0,
+    ) -> PreparedInstance:
+        """Poll get_instance until status=='ready'; raise on failure or timeout.
+
+        timeout:       max total seconds to wait (default 660 — just over the spec's
+                       10-minute prepare ceiling).
+        poll_interval: seconds between polls (default 3).
+
+        Raises SessionFailedError when the session enters terminal 'failed'.
+        Raises SessionError for other unexpected terminal states (released/expired).
+        Raises TimeoutError if the session is not ready within *timeout* seconds.
+        """
+        waited = 0.0
+        while True:
+            session = self.get_instance(instance_handle)
+            if session.is_ready:
+                return session
+            if session.status == "failed":
+                raise SessionFailedError(session.error_code, session.error_message)
+            if session.is_terminal:
+                raise SessionError(
+                    f"Session {instance_handle!r} ended in terminal state "
+                    f"{session.status!r} while waiting for ready"
+                )
+            if waited >= timeout:
+                raise TimeoutError(
+                    f"Session {instance_handle!r} not ready after {timeout:.0f}s "
+                    f"(status={session.status!r})"
+                )
+            time.sleep(poll_interval)
+            waited += poll_interval
+
+    @contextlib.contextmanager
+    def session(
+        self,
+        *,
+        instance_type: str,
+        hold_seconds: int,
+        mode: str | None = None,
+    ) -> Generator[PreparedInstance, None, None]:
+        """Context manager: prepare -> wait_until_ready -> yield -> release.
+
+        Release fires in a finally block. SessionConflictError and
+        SessionNotFoundError on release are swallowed and logged so cleanup never
+        masks an error raised inside the block or by wait_until_ready.
+        """
+        prepared = self.prepare_instance(
+            instance_type=instance_type, hold_seconds=hold_seconds, mode=mode
+        )
+        handle = prepared.instance_handle
+        try:
+            ready = self.wait_until_ready(handle)
+            yield ready
+        finally:
+            try:
+                self.release_instance(handle)
+            except (SessionConflictError, SessionNotFoundError) as exc:
+                log.warning("Session release suppressed (%s): %s", type(exc).__name__, exc)
 
     def append_instance_jobs(
         self,
@@ -444,27 +560,49 @@ class SparkFuseClient:
         share_sync_base_url: str,
         local_dir: Path,
     ) -> list[Path]:
-        """Download all top-level output files to *local_dir* (§9.2 / §9.3).
+        """Download all output files to *local_dir*, recursing into subdirectories (§9.2 / §9.3).
 
-        Returns the list of local paths written. Skips collection (directory)
-        entries; does not recurse into sub-directories (Depth:1 is flat).
+        Uses PROPFIND Depth:1 at each level, up to 3 levels deep. All files are
+        flattened into *local_dir* by basename; cloud-side directory structure is
+        not recreated locally. If two files share a basename after flattening, the
+        later one is renamed <stem>_N<ext> and a warning is logged. The root
+        collection entry is always skipped.
         """
         token = self._ensure_token()
         base_url = share_sync_base_url.rstrip("/")
-        entries = propfind(base_url, token, client=self._http)
         local_dir = Path(local_dir)
         local_dir.mkdir(parents=True, exist_ok=True)
-
         written: list[Path] = []
+        self._collect_outputs(base_url, token, local_dir, written, max_depth=3, _depth=0)
+        return written
+
+    def _collect_outputs(
+        self,
+        collection_url: str,
+        token: str,
+        local_dir: Path,
+        written: list[Path],
+        *,
+        max_depth: int,
+        _depth: int,
+    ) -> None:
+        """PROPFIND *collection_url* (Depth:1); download flat files, recurse into dirs."""
+        root_path = urlparse(collection_url).path.rstrip("/")
+        entries = propfind(collection_url, token, client=self._http)
         for entry in entries:
             if entry.is_collection:
-                continue
-            file_url = file_url_from_entry(base_url, entry)
-            local_path = local_dir / entry.name
-            log.info("Downloading %s -> %s", file_url, local_path)
-            download_file(file_url, token, local_path, client=self._http)
-            written.append(local_path)
-        return written
+                if entry.href.rstrip("/") == root_path:
+                    continue  # the collection itself — always skip
+                if _depth < max_depth:
+                    sub_url = file_url_from_entry(collection_url, entry).rstrip("/")
+                    self._collect_outputs(sub_url, token, local_dir, written,
+                                         max_depth=max_depth, _depth=_depth + 1)
+            else:
+                file_url = file_url_from_entry(collection_url, entry)
+                local_path = _safe_local_path(local_dir, entry.name)
+                log.info("Downloading %s -> %s", file_url, local_path)
+                download_file(file_url, token, local_path, client=self._http)
+                written.append(local_path)
 
 
 # ------------------------------------------------------------------
@@ -485,3 +623,25 @@ def _parse_retry_after(resp: httpx.Response) -> float | None:
         return float(value)
     except ValueError:
         return None
+
+
+def _safe_local_path(local_dir: Path, name: str) -> Path:
+    """Return a non-colliding path in *local_dir* for *name*.
+
+    If *local_dir/name* already exists (collision after flattening from different
+    subdirectories), appends _1, _2, … to the stem and logs a warning.
+    """
+    candidate = local_dir / name
+    if not candidate.exists():
+        return candidate
+    stem, suffix = Path(name).stem, Path(name).suffix
+    i = 1
+    while True:
+        candidate = local_dir / f"{stem}_{i}{suffix}"
+        if not candidate.exists():
+            log.warning(
+                "ShareSync: basename collision for %r; writing as %s",
+                name, candidate.name,
+            )
+            return candidate
+        i += 1
